@@ -172,7 +172,12 @@ func grokBillingSnapshot(config *GrokBillingConfig, status int) *xai.QuotaSnapsh
 	now := time.Now().UTC().Format(time.RFC3339)
 	snapshot := &xai.QuotaSnapshot{StatusCode: status, ObservationSource: "billing_api", LastProbeAt: now, UpdatedAt: now}
 	if config == nil || config.CreditUsagePercent == nil { return snapshot }
-	used := min(max(*config.CreditUsagePercent, 0), 100)
+	used := *config.CreditUsagePercent
+	if used < 0 {
+		used = 0
+	} else if used > 100 {
+		used = 100
+	}
 	limit, remaining := int64(100), int64(100-used+0.5)
 	window := &xai.QuotaWindow{Limit: &limit, Remaining: &remaining}
 	if config.CurrentPeriod != nil {
