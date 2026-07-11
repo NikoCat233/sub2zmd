@@ -675,6 +675,43 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).toContain('admin.accounts.usageWindow.grokMonthly|27.36|')
   })
 
+  it('Grok OAuth 首次加载 usage 时直接展示 Billing 额度', async () => {
+    getUsage.mockResolvedValue({
+      source: 'billing_api',
+      updated_at: '2026-07-11T05:59:31Z',
+      grok_credits: {
+        creditUsagePercent: 100,
+        currentPeriod: { end: '2026-07-17T09:18:09Z' }
+      },
+      grok_monthly: {
+        used: { val: 4104 },
+        monthlyLimit: { val: 15000 },
+        billingPeriodEnd: '2026-08-01T00:00:00Z'
+      }
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({ id: 3863, platform: 'grok', type: 'oauth', extra: {} })
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: {
+            props: ['label', 'utilization', 'resetsAt'],
+            template: '<div class="usage-bar">{{ label }}|{{ utilization }}|{{ resetsAt }}</div>'
+          },
+          AccountQuotaInfo: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(queryGrokQuota).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('admin.accounts.usageWindow.grokPeriod|100|')
+    expect(wrapper.text()).toContain('admin.accounts.usageWindow.grokMonthly|27.36|')
+  })
+
   it('Key 账号在 today stats loading 时显示骨架屏', async () => {
 		const wrapper = mount(AccountUsageCell, {
 		  props: {

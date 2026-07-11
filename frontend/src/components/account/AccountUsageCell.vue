@@ -1111,6 +1111,20 @@ const isAnthropicOAuthOrSetupToken = computed(() => {
   return props.account.platform === 'anthropic' && (props.account.type === 'oauth' || props.account.type === 'setup-token')
 })
 
+const applyGrokBilling = (result: AccountUsageInfo) => {
+  if (props.account.platform !== 'grok' || (!result.grok_credits && !result.grok_monthly)) return
+  grokProbeResult.value = {
+    source: 'billing_api',
+    credits: result.grok_credits || null,
+    monthly: result.grok_monthly || null,
+    headers_observed: true,
+    reset_supported: false,
+    fetched_at: result.updated_at
+      ? Math.floor(new Date(result.updated_at).getTime() / 1000)
+      : Math.floor(Date.now() / 1000)
+  }
+}
+
 const loadUsage = async (options?: { source?: 'passive' | 'active'; bypassCache?: boolean; silent?: boolean }) => {
   if (!shouldFetchUsage.value) return
 
@@ -1119,6 +1133,7 @@ const loadUsage = async (options?: { source?: 'passive' | 'active'; bypassCache?
     const cached = _usageCache.get(props.account.id)
     if (cached && Date.now() - cached.ts < USAGE_CACHE_TTL) {
       usageInfo.value = cached.data
+      applyGrokBilling(cached.data)
       loading.value = false
       return
     }
@@ -1134,6 +1149,7 @@ const loadUsage = async (options?: { source?: 'passive' | 'active'; bypassCache?
     const result = await enqueueUsageRequest(props.account, fetchFn)
     if (!unmounted.value) {
       usageInfo.value = result
+      applyGrokBilling(result)
       _usageCache.set(props.account.id, { data: result, ts: Date.now() })
     }
   } catch (e: any) {
