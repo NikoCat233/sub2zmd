@@ -566,7 +566,7 @@ describe('AccountUsageCell', () => {
 		expect(badges.some(node => node.attributes('title') === 'usage.userBilled')).toBe(true)
   })
 
-  it('Grok OAuth 会展示本地 user billed 用量并保留超限百分比', async () => {
+  it('Grok OAuth 展示本地 user billed 用量且不再渲染旧请求额度条', async () => {
     getUsage.mockResolvedValue({
       grok_local_usage: {
         requests: 4,
@@ -611,11 +611,43 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).toContain('1.2K')
     expect(wrapper.text()).toContain('A $0.12')
     expect(wrapper.text()).toContain('U $0.34')
-    expect(wrapper.text()).toContain('admin.accounts.usageWindow.grokRequests|120|2026-07-09T16:00:00Z')
+    expect(wrapper.text()).not.toContain('admin.accounts.usageWindow.grokRequests|')
 
     const badges = wrapper.findAll('span[title]')
     expect(badges.some(node => node.attributes('title') === 'usage.accountBilled')).toBe(true)
     expect(badges.some(node => node.attributes('title') === 'usage.userBilled')).toBe(true)
+  })
+
+  it('Grok OAuth 已封禁时仍可探测并刷新用量状态', async () => {
+    getUsage
+      .mockResolvedValueOnce({ is_forbidden: true, grok_entitlement_status: 'forbidden' })
+      .mockResolvedValueOnce({ is_forbidden: false, grok_local_usage: null })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({ id: 3862, platform: 'grok', type: 'oauth', extra: {} })
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: true,
+          AccountQuotaInfo: true,
+          GrokQuotaProbeCell: {
+            emits: ['probed'],
+            template: '<button class="grok-probe" @click="$emit(\'probed\', {})">probe</button>'
+          }
+        }
+      }
+    })
+
+    await flushPromises()
+    expect(wrapper.text()).toContain('forbidden')
+    expect(wrapper.find('.grok-probe').exists()).toBe(true)
+
+    await wrapper.find('.grok-probe').trigger('click')
+    await flushPromises()
+
+    expect(getUsage).toHaveBeenCalledTimes(2)
+    expect(getUsage).toHaveBeenLastCalledWith(3862)
   })
 
   it('Key 账号在 today stats loading 时显示骨架屏', async () => {
