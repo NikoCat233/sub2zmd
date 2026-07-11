@@ -3,14 +3,18 @@ import { flushPromises, mount } from '@vue/test-utils'
 import AccountUsageCell from '../AccountUsageCell.vue'
 import type { Account } from '@/types'
 
-const { getUsage } = vi.hoisted(() => ({
-  getUsage: vi.fn()
+const { getUsage, queryGrokQuota } = vi.hoisted(() => ({
+  getUsage: vi.fn(),
+  queryGrokQuota: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       getUsage
+    },
+    grok: {
+      queryQuota: queryGrokQuota
     }
   }
 }))
@@ -57,6 +61,7 @@ function makeAccount(overrides: Partial<Account>): Account {
 describe('AccountUsageCell', () => {
   beforeEach(() => {
     getUsage.mockReset()
+    queryGrokQuota.mockReset()
     Object.defineProperty(window, 'matchMedia', {
       writable: true,
       value: vi.fn().mockImplementation(() => ({
@@ -137,7 +142,10 @@ describe('AccountUsageCell', () => {
       },
       global: {
         stubs: {
-          UsageProgressBar: true,
+          UsageProgressBar: {
+            props: ['label', 'utilization', 'resetsAt'],
+            template: '<div class="usage-bar">{{ label }}|{{ utilization }}|{{ resetsAt }}</div>'
+          },
           AccountQuotaInfo: true
         }
       }
@@ -622,6 +630,21 @@ describe('AccountUsageCell', () => {
     getUsage
       .mockResolvedValueOnce({ is_forbidden: true, grok_entitlement_status: 'forbidden' })
       .mockResolvedValueOnce({ is_forbidden: false, grok_local_usage: null })
+    queryGrokQuota.mockResolvedValue({
+      source: 'billing_api',
+      credits: {
+        creditUsagePercent: 100,
+        currentPeriod: { end: '2026-07-17T09:18:09Z' }
+      },
+      monthly: {
+        used: { val: 4104 },
+        monthlyLimit: { val: 15000 },
+        billingPeriodEnd: '2026-08-01T00:00:00Z'
+      },
+      headers_observed: true,
+      reset_supported: false,
+      fetched_at: 1783749571
+    })
 
     const wrapper = mount(AccountUsageCell, {
       props: {
@@ -629,25 +652,27 @@ describe('AccountUsageCell', () => {
       },
       global: {
         stubs: {
-          UsageProgressBar: true,
-          AccountQuotaInfo: true,
-          GrokQuotaProbeCell: {
-            emits: ['probed'],
-            template: '<button class="grok-probe" @click="$emit(\'probed\', {})">probe</button>'
-          }
+          UsageProgressBar: {
+            props: ['label', 'utilization', 'resetsAt'],
+            template: '<div class="usage-bar">{{ label }}|{{ utilization }}|{{ resetsAt }}</div>'
+          },
+          AccountQuotaInfo: true
         }
       }
     })
 
     await flushPromises()
     expect(wrapper.text()).toContain('forbidden')
-    expect(wrapper.find('.grok-probe').exists()).toBe(true)
+    expect(wrapper.find('button').exists()).toBe(true)
 
-    await wrapper.find('.grok-probe').trigger('click')
+    await wrapper.find('button').trigger('click')
     await flushPromises()
 
     expect(getUsage).toHaveBeenCalledTimes(2)
     expect(getUsage).toHaveBeenLastCalledWith(3862)
+    expect(queryGrokQuota).toHaveBeenCalledWith(3862)
+    expect(wrapper.text()).toContain('admin.accounts.usageWindow.grokPeriod|100|')
+    expect(wrapper.text()).toContain('admin.accounts.usageWindow.grokMonthly|27.36|')
   })
 
   it('Key 账号在 today stats loading 时显示骨架屏', async () => {

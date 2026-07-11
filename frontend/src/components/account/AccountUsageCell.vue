@@ -354,7 +354,7 @@
         <span class="inline-block rounded px-1.5 py-0.5 text-[10px] font-medium bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">
           {{ grokEntitlementLabel || t('admin.accounts.forbidden') }}
         </span>
-        <GrokQuotaProbeCell :account="account" @probed="handleGrokProbed" />
+        <GrokQuotaProbeCell :account="account" :initial-data="grokProbeResult" @probed="handleGrokProbed" />
       </div>
       <div v-else-if="usageInfo" class="space-y-1">
         <div v-if="grokEntitlementLabel" class="mb-0.5">
@@ -385,11 +385,11 @@
         <div v-if="usageInfo.error" class="truncate text-xs text-amber-600 dark:text-amber-400 max-w-[200px]" :title="usageInfo.error">
           {{ usageErrorLabel }}
         </div>
-        <GrokQuotaProbeCell :account="account" @probed="handleGrokProbed" />
+        <GrokQuotaProbeCell :account="account" :initial-data="grokProbeResult" @probed="handleGrokProbed" />
       </div>
       <div v-else class="space-y-1">
         <div class="text-xs text-gray-400">-</div>
-        <GrokQuotaProbeCell :account="account" @probed="handleGrokProbed" />
+        <GrokQuotaProbeCell :account="account" :initial-data="grokProbeResult" @probed="handleGrokProbed" />
       </div>
     </template>
 
@@ -581,6 +581,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
+import type { GrokQuotaProbeResult } from '@/api/admin/grok'
 import type { Account, AccountUsageInfo, GeminiCredentials, WindowStats } from '@/types'
 import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import { enqueueUsageRequest } from '@/utils/usageLoadQueue'
@@ -618,6 +619,7 @@ const loading = ref(false)
 const activeQueryLoading = ref(false)
 const error = ref<string | null>(null)
 const usageInfo = ref<AccountUsageInfo | null>(null)
+const grokProbeResult = ref<GrokQuotaProbeResult | null>(null)
 const rootRef = ref<HTMLElement | null>(null)
 const isDesktopViewport = ref(
   typeof window === 'undefined' ? true : window.matchMedia(desktopViewportQuery).matches
@@ -1109,7 +1111,7 @@ const isAnthropicOAuthOrSetupToken = computed(() => {
   return props.account.platform === 'anthropic' && (props.account.type === 'oauth' || props.account.type === 'setup-token')
 })
 
-const loadUsage = async (options?: { source?: 'passive' | 'active'; bypassCache?: boolean }) => {
+const loadUsage = async (options?: { source?: 'passive' | 'active'; bypassCache?: boolean; silent?: boolean }) => {
   if (!shouldFetchUsage.value) return
 
   // Check cache
@@ -1122,7 +1124,7 @@ const loadUsage = async (options?: { source?: 'passive' | 'active'; bypassCache?
     }
   }
 
-  loading.value = true
+  if (!options?.silent) loading.value = true
   error.value = null
 
   try {
@@ -1140,13 +1142,14 @@ const loadUsage = async (options?: { source?: 'passive' | 'active'; bypassCache?
       console.error('Failed to load usage:', e)
     }
   } finally {
-    if (!unmounted.value) loading.value = false
+    if (!unmounted.value && !options?.silent) loading.value = false
   }
 }
 
-const handleGrokProbed = () => {
+const handleGrokProbed = (result: GrokQuotaProbeResult) => {
+  grokProbeResult.value = result
   _usageCache.delete(props.account.id)
-  loadUsage({ bypassCache: true }).catch((e) => {
+  loadUsage({ bypassCache: true, silent: true }).catch((e) => {
     console.error('Failed to refresh Grok usage after quota probe:', e)
   })
 }

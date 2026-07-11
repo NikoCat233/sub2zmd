@@ -74,6 +74,7 @@ import UsageProgressBar from './UsageProgressBar.vue'
 
 const props = defineProps<{
   account: Account
+  initialData?: GrokQuotaProbeResult | null
 }>()
 const emit = defineEmits<{
   probed: [result: GrokQuotaProbeResult]
@@ -84,7 +85,7 @@ const { t } = useI18n()
 const visible = computed(() => props.account.platform === 'grok' && props.account.type === 'oauth')
 const loading = ref(false)
 const error = ref<string | null>(null)
-const data = ref<GrokQuotaProbeResult | null>(null)
+const data = ref<GrokQuotaProbeResult | null>(props.initialData || null)
 
 const extractErrorMessage = (e: unknown): string => {
   const err = e as {
@@ -151,6 +152,13 @@ watch(
     data.value = null
     error.value = null
     loading.value = false
+  }
+)
+
+watch(
+  () => props.initialData,
+  (value) => {
+    if (value) data.value = value
   }
 )
 </script>
