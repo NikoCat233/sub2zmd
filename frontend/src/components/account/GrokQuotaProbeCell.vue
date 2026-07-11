@@ -92,6 +92,16 @@ const retryAfterLabel = computed(() => {
 const summary = computed(() => {
   const snapshot = data.value?.snapshot
   if (!data.value) return ''
+	const credits = data.value.credits
+	const monthly = data.value.monthly
+	const billingParts: string[] = []
+	if (credits?.creditUsagePercent != null) {
+		billingParts.push(`${credits.creditUsagePercent.toFixed(1)}%`)
+	}
+	if (monthly?.used?.val != null && monthly?.monthlyLimit?.val != null) {
+		billingParts.push(`${monthly.used.val}/${monthly.monthlyLimit.val}`)
+	}
+	if (billingParts.length > 0) return billingParts.join(' | ')
   if (!snapshot) return t('admin.accounts.usageWindow.grokNoHeaders')
   const parts = [
     formatWindow(t('admin.accounts.usageWindow.grokRequests'), snapshot.requests),

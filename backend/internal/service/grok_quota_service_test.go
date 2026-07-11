@@ -13,7 +13,6 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/stretchr/testify/require"
-	"github.com/tidwall/gjson"
 )
 
 type grokQuotaAccountRepo struct {
@@ -63,6 +62,7 @@ func TestGrokQuotaServiceProbeUsageStoresHeaders(t *testing.T) {
 		Credentials: map[string]any{
 			"access_token": "access-token",
 			"expires_at":   time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+			"user_id":      "user-42",
 		},
 	}
 	repo := &grokQuotaAccountRepo{
@@ -70,37 +70,34 @@ func TestGrokQuotaServiceProbeUsageStoresHeaders(t *testing.T) {
 			accountsByID: map[int64]*Account{42: account},
 		},
 	}
-	upstream := &httpUpstreamRecorder{resp: &http.Response{
-		StatusCode: http.StatusOK,
-		Header: http.Header{
-			"X-Ratelimit-Limit-Requests":     []string{"10"},
-			"X-Ratelimit-Remaining-Requests": []string{"7"},
-			"X-Ratelimit-Reset-Requests":     []string{"2000000000"},
-			"X-Ratelimit-Limit-Tokens":       []string{"1000"},
-			"X-Ratelimit-Remaining-Tokens":   []string{"900"},
-		},
-		Body: io.NopCloser(strings.NewReader(`{"id":"resp_probe"}`)),
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"config":{"creditUsagePercent":30,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","end":"2033-05-18T03:33:20Z"}}}`))},
+		{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"config":{"monthlyLimit":{"val":15000},"used":{"val":387}}}`))},
 	}}
 	svc := NewGrokQuotaService(repo, nil, NewGrokTokenProvider(repo, nil), upstream)
 
 	result, err := svc.ProbeUsage(context.Background(), 42)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, result.StatusCode)
-	require.Equal(t, "grok-4.3", result.Model)
+	require.Equal(t, "billing_api", result.Source)
 	require.True(t, result.HeadersObserved)
 	require.NotNil(t, result.Snapshot)
 	require.True(t, result.Snapshot.HeadersObserved)
-	require.Equal(t, "active_probe", result.Snapshot.ObservationSource)
+	require.Equal(t, "billing_api", result.Snapshot.ObservationSource)
 	require.NotEmpty(t, result.Snapshot.LastProbeAt)
 	require.NotEmpty(t, result.Snapshot.LastHeadersSeenAt)
 	require.NotNil(t, result.Snapshot.Requests)
-	require.EqualValues(t, 10, *result.Snapshot.Requests.Limit)
-	require.EqualValues(t, 7, *result.Snapshot.Requests.Remaining)
-	require.Equal(t, "https://api.x.ai/v1/responses", upstream.lastReq.URL.String())
+	require.EqualValues(t, 100, *result.Snapshot.Requests.Limit)
+	require.EqualValues(t, 70, *result.Snapshot.Requests.Remaining)
+	require.Len(t, upstream.requests, 2)
+	require.Equal(t, "https://cli-chat-proxy.grok.com/v1/billing?format=credits", upstream.requests[0].URL.String())
+	require.Equal(t, "https://cli-chat-proxy.grok.com/v1/billing", upstream.requests[1].URL.String())
 	require.Equal(t, "Bearer access-token", upstream.lastReq.Header.Get("Authorization"))
-	require.Equal(t, "grok-4.3", gjson.GetBytes(upstream.lastBody, "model").String())
-	require.Contains(t, string(upstream.lastBody), `"max_output_tokens":1`)
-	require.Contains(t, string(upstream.lastBody), `"store":false`)
+	require.Equal(t, "xai-grok-cli", upstream.lastReq.Header.Get("X-XAI-Token-Auth"))
+	require.Equal(t, "0.2.93", upstream.lastReq.Header.Get("x-grok-client-version"))
+	require.Equal(t, "grok-shell/0.2.93 (windows; x86_64)", upstream.lastReq.Header.Get("User-Agent"))
+	require.Equal(t, "user-42", upstream.lastReq.Header.Get("x-userid"))
+	require.Equal(t, float64(15000), result.Monthly.MonthlyLimit.Val)
 	require.NotNil(t, repo.updates[42][grokQuotaSnapshotExtraKey])
 }
 
@@ -116,6 +113,7 @@ func TestGrokQuotaServiceProbeUsageIgnoresAccountGrokMapping(t *testing.T) {
 			"access_token": "access-token",
 			"expires_at":   time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
 			"model_mapping": map[string]any{
+			"user_id": "user-47",
 				"grok":          "grok-composer",
 				"grok-composer": "grok-composer-2.5-fast",
 			},
@@ -135,9 +133,8 @@ func TestGrokQuotaServiceProbeUsageIgnoresAccountGrokMapping(t *testing.T) {
 
 	result, err := svc.ProbeUsage(context.Background(), 47)
 	require.NoError(t, err)
-	require.Equal(t, "grok-4.3", result.Model)
-	require.Equal(t, "grok-4.3", gjson.GetBytes(upstream.lastBody, "model").String())
-	require.NotContains(t, string(upstream.lastBody), "grok-composer")
+	require.Empty(t, result.Model)
+	require.Equal(t, http.MethodGet, upstream.lastReq.Method)
 }
 
 func TestGrokQuotaServiceProbeUsageReportsProbeModelOnUpstreamError(t *testing.T) {
@@ -151,6 +148,7 @@ func TestGrokQuotaServiceProbeUsageReportsProbeModelOnUpstreamError(t *testing.T
 		Credentials: map[string]any{
 			"access_token": "access-token",
 			"expires_at":   time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+			"user_id":      "user-48",
 		},
 	}
 	repo := &grokQuotaAccountRepo{
@@ -167,8 +165,8 @@ func TestGrokQuotaServiceProbeUsageReportsProbeModelOnUpstreamError(t *testing.T
 
 	_, err := svc.ProbeUsage(context.Background(), 48)
 	require.Error(t, err)
-	require.Equal(t, "GROK_QUOTA_PROBE_UPSTREAM_ERROR", infraerrors.Reason(err))
-	require.Contains(t, infraerrors.Message(err), `probe model "grok-4.3"`)
+	require.Equal(t, "GROK_QUOTA_UPSTREAM_ERROR", infraerrors.Reason(err))
+	require.Contains(t, infraerrors.Message(err), "billing returned 400")
 }
 
 func TestGrokQuotaServiceProbeUsageLoadsProxyWhenAccountEdgeMissing(t *testing.T) {
@@ -184,6 +182,7 @@ func TestGrokQuotaServiceProbeUsageLoadsProxyWhenAccountEdgeMissing(t *testing.T
 		Credentials: map[string]any{
 			"access_token": "access-token",
 			"expires_at":   time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+			"user_id":      "user-46",
 		},
 	}
 	repo := &grokQuotaAccountRepo{
@@ -225,6 +224,7 @@ func TestGrokQuotaServiceProbeUsageStoresNoHeadersState(t *testing.T) {
 		Credentials: map[string]any{
 			"access_token": "access-token",
 			"expires_at":   time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+			"user_id":      "user-45",
 		},
 	}
 	repo := &grokQuotaAccountRepo{
@@ -265,6 +265,7 @@ func TestGrokQuotaServiceProbeUsageReturnsRateLimitedSnapshot(t *testing.T) {
 		Credentials: map[string]any{
 			"access_token": "access-token",
 			"expires_at":   time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+			"user_id":      "user-43",
 		},
 	}
 	repo := &grokQuotaAccountRepo{
