@@ -626,6 +626,27 @@ describe('AccountUsageCell', () => {
     expect(badges.some(node => node.attributes('title') === 'usage.userBilled')).toBe(true)
   })
 
+  it('Grok OAuth 收到 429 时提示免费额度耗尽', async () => {
+    getUsage.mockResolvedValue({
+      error: 'rate limited',
+      error_code: 'rate_limited',
+      grok_quota_snapshot_state: 'observed'
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({ id: 3863, platform: 'grok', type: 'oauth', extra: {} })
+      },
+      global: {
+        stubs: { UsageProgressBar: true, AccountQuotaInfo: true, GrokQuotaProbeCell: true }
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('admin.accounts.grokQuotaExhausted')
+  })
+
   it('Grok OAuth 已封禁时仍可探测并刷新用量状态', async () => {
     getUsage
       .mockResolvedValueOnce({ is_forbidden: true, grok_entitlement_status: 'forbidden' })

@@ -1253,6 +1253,7 @@ export default {
       linkCopied: 'Link Copied',
       needsReauth: 'Re-auth Required',
       rateLimited: 'Rate Limited',
+      grokQuotaExhausted: 'Grok free quota exhausted; waiting for the upstream reset',
       usageError: 'Fetch Error'
     },
 

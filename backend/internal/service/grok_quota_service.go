@@ -93,6 +93,16 @@ func (s *GrokQuotaService) ProbeUsage(ctx context.Context, accountID int64) (*Gr
 	if monthlyErr != nil { monthly = nil } // Credits are the CLI's primary quota view.
 
 	snapshot := grokBillingSnapshot(credits, status)
+	// Free accounts do not expose creditUsagePercent. Their billing response only
+	// describes the period, so it must not erase a passive 429/rate-limit snapshot.
+	if credits != nil && credits.CreditUsagePercent == nil {
+		if observed, parseErr := grokQuotaSnapshotFromExtra(account.Extra); parseErr == nil && observed != nil {
+			now := time.Now().UTC().Format(time.RFC3339)
+			observed.LastProbeAt = now
+			observed.ObservationSource = "passive"
+			snapshot = observed
+		}
+	}
 	_ = s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{grokQuotaSnapshotExtraKey: snapshot})
 	return &GrokQuotaProbeResult{
 		Source: "billing_api", Snapshot: snapshot, Credits: credits, Monthly: monthly,

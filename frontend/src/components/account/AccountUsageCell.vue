@@ -1073,6 +1073,9 @@ const needsReauth = computed(() => !!usageInfo.value?.needs_reauth)
 // 降级错误标签（rate_limited / network_error）
 const usageErrorLabel = computed(() => {
   const code = usageInfo.value?.error_code
+  if (code === 'rate_limited' && props.account.platform === 'grok') {
+    return t('admin.accounts.grokQuotaExhausted')
+  }
   if (code === 'rate_limited') return t('admin.accounts.rateLimited')
   return t('admin.accounts.usageError')
 })

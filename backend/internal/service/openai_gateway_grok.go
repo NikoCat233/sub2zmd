@@ -632,10 +632,11 @@ func buildGrokResponsesRequest(ctx context.Context, c *gin.Context, account *Acc
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	// Free Grok OAuth accounts are served by the Grok CLI proxy, which rejects
+	// requests without the CLI identity headers with 426 Upgrade Required.
+	setGrokCLICommonHeaders(req, token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	req.Header.Set("User-Agent", "sub2api-grok/1.0")
 	if c != nil {
 		if v := c.GetHeader("OpenAI-Beta"); strings.TrimSpace(v) != "" {
 			req.Header.Set("OpenAI-Beta", v)
@@ -648,7 +649,9 @@ func (s *OpenAIGatewayService) updateGrokUsageSnapshot(ctx context.Context, acco
 	if s == nil || s.accountRepo == nil || accountID <= 0 || snapshot == nil {
 		return
 	}
-	if s.codexSnapshotThrottle != nil && !s.codexSnapshotThrottle.Allow(accountID, time.Now()) {
+	// Never throttle a 429 snapshot: it drives the quota-exhausted indication and
+	// must replace an earlier successful snapshot immediately.
+	if snapshot.StatusCode != http.StatusTooManyRequests && s.codexSnapshotThrottle != nil && !s.codexSnapshotThrottle.Allow(accountID, time.Now()) {
 		return
 	}
 	_ = s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{

@@ -372,6 +372,7 @@ export default {
       linkCopied: '链接已复制',
       needsReauth: '需要重新授权',
       rateLimited: '限流中',
+      grokQuotaExhausted: 'Grok 免费额度已耗尽，请等待上游重置',
       usageError: '获取失败',
       form: {
         nameLabel: '账号名称',

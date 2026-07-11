@@ -101,6 +101,36 @@ func TestGrokQuotaServiceProbeUsageStoresHeaders(t *testing.T) {
 	require.NotNil(t, repo.updates[42][grokQuotaSnapshotExtraKey])
 }
 
+func TestGrokQuotaServiceFreeBillingPreservesExhaustedPassiveSnapshot(t *testing.T) {
+	t.Parallel()
+
+	zero, limit := int64(0), int64(21)
+	reset := time.Now().Add(time.Hour).Unix()
+	account := &Account{
+		ID: 49, Platform: PlatformGrok, Type: AccountTypeOAuth, Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token": "access-token", "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339), "user_id": "user-49",
+		},
+		Extra: map[string]any{grokQuotaSnapshotExtraKey: &xai.QuotaSnapshot{
+			StatusCode: http.StatusTooManyRequests,
+			Requests: &xai.QuotaWindow{Limit: &limit, Remaining: &zero, ResetUnix: &reset},
+			HeadersObserved: true, UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+		}},
+	}
+	repo := &grokQuotaAccountRepo{mockAccountRepoForPlatform: &mockAccountRepoForPlatform{accountsByID: map[int64]*Account{49: account}}}
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","end":"2033-05-18T03:33:20Z"}}}`))},
+		{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"config":{"monthlyLimit":{"val":0},"used":{"val":0}}}`))},
+	}}
+
+	result, err := NewGrokQuotaService(repo, nil, NewGrokTokenProvider(repo, nil), upstream).ProbeUsage(context.Background(), 49)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusTooManyRequests, result.Snapshot.StatusCode)
+	require.EqualValues(t, 0, *result.Snapshot.Requests.Remaining)
+	require.True(t, result.HeadersObserved)
+	require.NotEmpty(t, result.Snapshot.LastProbeAt)
+}
+
 func TestGrokQuotaServiceProbeUsageIgnoresAccountGrokMapping(t *testing.T) {
 	t.Parallel()
 
@@ -340,7 +370,9 @@ func TestShouldAutoPauseGrokAccountByQuota(t *testing.T) {
 		{
 			name: "retry after expired",
 			snapshot: xai.QuotaSnapshot{
+				StatusCode:        http.StatusTooManyRequests,
 				RetryAfterSeconds: &retryAfter,
+				Requests:          &xai.QuotaWindow{Limit: &limit, Remaining: &zero},
 				UpdatedAt:         time.Now().Add(-time.Duration(retryAfter+1) * time.Second).UTC().Format(time.RFC3339),
 			},
 			want: false,
