@@ -53,9 +53,16 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		return nil, fmt.Errorf("model %s is an image model and is not available on the Responses endpoint; use /v1/images/generations instead", upstreamModel)
 	}
 	cacheIdentity := resolveGrokCacheIdentity(c, body, "", upstreamModel)
+	isCompactRequest := isOpenAIResponsesCompactPath(c)
 	patchedBody, err := patchGrokResponsesBody(body, upstreamModel)
 	if err != nil {
 		return nil, err
+	}
+	if isCompactRequest {
+		patchedBody, err = buildGrokCompactRequestBody(patchedBody)
+		if err != nil {
+			return nil, err
+		}
 	}
 	patchedBody, err = applyGrokResponsesCacheIdentity(patchedBody, body, cacheIdentity, account.IsGrokOAuth())
 	if err != nil {
@@ -193,6 +200,10 @@ func patchGrokResponsesBody(body []byte, upstreamModel string) ([]byte, error) {
 		}
 	}
 	out, err = sanitizeGrokResponsesUnsupportedFields(out)
+	if err != nil {
+		return nil, err
+	}
+	out, err = convertOpenAICompactInputsForGrok(out)
 	if err != nil {
 		return nil, err
 	}
